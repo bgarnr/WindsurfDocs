@@ -1,0 +1,43 @@
+Project: <YOUR PROJECT NAME>
+
+Tech Stack:
+- C# with .NET 8
+- Entity Framework Core
+- MudBlazor
+- Semantic Kernel 1.31.0
+- AutoMapper
+
+Architecture: Onion Architecture
+Solution Structure:
+<PROJECT 1 NAME, DESCRIPTION>
+<PROJECT 2 NAME, DESCRIPTION>
+<PROJECT 3 NAME, DESCRIPTION>
+
+Key Concepts:
+- DESCRIPTION OF ENTITY RELATIONSHIPS, AND GOALS
+- Clean separation of concerns
+- Dependency Injection
+- SOLID principles
+- Asynchronous programming
+
+Development Guidelines:
+- Use nullable reference types
+- Create interfaces for services in Core layer
+- Use AutoMapper for object-to-object mapping
+- Leverage MudBlazor components for UI
+- Integrate Semantic Kernel for AI-powered features
+- Follow C# coding conventions and best practices
+
+Performance Considerations:
+- Efficient database queries
+- Proper use of async/await
+- Caching strategies where appropriate
+
+Security:
+- Implement authentication and authorization
+- Secure API endpoints
+- Follow OWASP guidelines
+
+When providing code snippets or guidance, adhere to these specifications and best practices for .NET, MudBlazor, and onion architecture.
+
+Do not be overly verbose or overcomplicated. Keep it simple and clear.
