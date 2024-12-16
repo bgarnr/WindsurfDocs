@@ -1,0 +1,17 @@
+@echo off
+Setlocal EnableDelayedExpansion
+
+REM Get the current date and time in YYYYMMDDHHMM format
+set datetime=%date:~-4%%date:~4,2%%date:~7,2%%time:~0,2%%time:~3,2%
+
+REM Define the output file name with the current date and time
+set outputfile=MyDevFiles_!datetime!.txt
+
+REM Check for files with .cs and .razor extensions and concatenate their contents into the output file
+for /r %%i in (*.cs, *.razor) do (
+    type "%%i" >> "!outputfile!"
+    echo. >> "!outputfile!"
+)
+
+echo Done! Your code has been concatenated into !outputfile!
+Endlocal

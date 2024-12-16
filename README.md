@@ -1,6 +1,9 @@
 # Grounding for Windsurf 
 ## Semantic Kernel Auto Function Calling
 
+Helper file: ConcatAllCodeFilesForAi.bat.txt
+This is a bat file. It will find all the .cs and .razor files in the currenet directory and make a single file out of all the concatenated contents. I have found this useful if i want to setup an ai session with grounding on a topic like my models, or even just all the interfaces for my services because it can infer a great deal about the system from that.
+
 Files under SemanticKernelRepoFIles are from the github repo for  Semantic Kernel at the time of version 1.31.0
 https://github.com/microsoft/semantic-kernel
 
