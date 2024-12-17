@@ -1,0 +1,236 @@
+// project files shared as an example of setting up
+// semantic kernel with auto function calling and streaming
+// the example code also includes how to intercept function calls
+// and add a Guid Id as an argument
+
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
+using Omnigeist.AI.Services.Abstract;
+using Omnigeist.AI.SK.Filters;
+using Omnigeist.AI.SK.Plugins;
+using Omnigeist.Core.Entities.Abstract;
+using Omnigeist.Core.Entities.Concrete;
+using Omnigeist.Core.Services.Abstract;
+
+public class ChatAIWizardService : IChatAIWizardService
+{
+   #region Private Fields
+   private readonly IConfiguration _configuration;
+   private readonly ILoggerFactory _loggerFactory;
+   private readonly IWizardStateCoreService _wizardStateCoreService;
+   private readonly IDataFetcherCoreService _dataFetcherCoreService;
+   private readonly string _systemMessagePath;
+   #endregion
+
+   public ChatAIWizardService(
+       IConfiguration configuration,
+       ILoggerFactory loggerFactory,
+       IWizardStateCoreService wizardStateService,
+       IDataFetcherCoreService dataFetcherService)
+   {
+      _configuration = configuration;
+      _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+      _wizardStateCoreService = wizardStateService;
+      _dataFetcherCoreService = dataFetcherService;
+      _systemMessagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SK", "Prompts", "CrudChat", "SystemMessages", "WizardSystemMessage.txt");
+   }
+   public async IAsyncEnumerable<IChatMessage> ProcessWizardChatMessageWithAutoFunctionCallsAsync(IChatTab chatTab)
+   {
+      var kernel = await CreateKernelAsync(chatTab.Id);
+      var chatCompletionService = kernel.GetRequiredService<IChatCompletionService>();
+
+      var systemMessage = await GetSystemMessageAsync();
+      if (chatTab.WizardState != null)
+      {
+         systemMessage = InjectWizardStateIntoSystemMessage(systemMessage, chatTab);
+      }
+
+      var chatHistory = new ChatHistory(systemMessage);
+      foreach (var message in chatTab.Messages)
+      {
+         chatHistory.AddMessage(message.IsUserMessage ? AuthorRole.User : AuthorRole.Assistant, message.Text);
+      }
+
+      // Configure settings with auto-invoke enabled
+      var settings = new OpenAIPromptExecutionSettings 
+      { 
+         FunctionChoiceBehavior = FunctionChoiceBehavior.Auto() 
+      };
+
+      var currentMessage = new ChatMessage 
+      { 
+         ChatTabId = chatTab.Id,
+         IsUserMessage = false,
+         Text = string.Empty,
+         FunctionCalls = new List<FunctionCall>()
+      };
+
+      // First streaming interaction
+      await foreach (var update in chatCompletionService.GetStreamingChatMessageContentsAsync(
+         chatHistory.ToArray().Last().Content,
+         settings,
+         kernel))
+      {
+         if (!string.IsNullOrEmpty(update.Content))
+         {
+            currentMessage.Text += update.Content;
+            yield return currentMessage;
+         }
+      }
+
+      // If there were any auto-executed functions, get the final response
+      // not working as expected, moving logging to the plugin level
+      var functionCalls = FunctionCallContent.GetFunctionCalls(chatHistory.Last());
+      if (functionCalls.Any())
+      {
+         await foreach (var update in chatCompletionService.GetStreamingChatMessageContentsAsync(
+            chatHistory,
+            settings,
+            kernel))
+         {
+            if (!string.IsNullOrEmpty(update.Content))
+            {
+               currentMessage.Text += update.Content;
+               yield return currentMessage;
+            }
+         }
+      }
+   }
+
+   private async Task<Kernel> CreateKernelAsync(Guid chatTabId)
+   {
+      var builder = Kernel.CreateBuilder();
+      builder.AddOpenAIChatCompletion(
+          modelId: "gpt-3.5-turbo",
+          apiKey: _configuration["OpenAISecretKey"],
+          orgId: _configuration["OpenAIOrgId"]
+      );
+
+      // Add filters for function invocation
+      builder.Services.AddSingleton(_loggerFactory);
+      builder.Services.AddSingleton<IFunctionInvocationFilter, ChatTabFunctionFilter>();
+      builder.Services.AddSingleton(new ChatTabContext { ChatTabId = chatTabId });
+
+      var wizardStatePlugin = new WizardStatePlugin(_wizardStateCoreService);
+      var dataFetchPlugin = new DataFetchPlugin(_dataFetcherCoreService, _wizardStateCoreService);
+
+      var kernel = builder.Build();
+      kernel.Plugins.AddFromObject(wizardStatePlugin, "WizardState");
+      kernel.Plugins.AddFromObject(dataFetchPlugin, "DataFetch");
+
+      return kernel;
+   }
+   
+   
+   using Microsoft.Extensions.Logging;
+using Microsoft.SemanticKernel;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Omnigeist.AI.SK.Filters
+{
+   public class ChatTabFunctionFilter : IFunctionInvocationFilter
+   {
+      private readonly ChatTabContext _context;
+      private readonly ILogger _logger;
+
+      public ChatTabFunctionFilter(ChatTabContext context, ILoggerFactory loggerFactory)
+      {
+         _context = context;
+         _logger = loggerFactory.CreateLogger<ChatTabFunctionFilter>();
+      }
+
+      public async Task OnFunctionInvocationAsync(FunctionInvocationContext context, Func<FunctionInvocationContext, Task> next)
+      {
+         context.Arguments["chatTabId"] = _context.ChatTabId;
+         _logger.LogInformation($"Invoking {context.Function.Name} with chatTabId: {_context.ChatTabId}");
+
+         await next(context);
+      }
+   }
+}
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Omnigeist.AI.SK.Filters
+{
+   public class ChatTabContext
+   {
+      public Guid ChatTabId { get; set; }
+   }
+}
+
+//plugiin example code
+using Microsoft.SemanticKernel;
+using Omnigeist.Core.Entities.Concrete;
+using Omnigeist.Core.Services.Abstract;
+using System.ComponentModel;
+using System.Text.Json;
+
+namespace Omnigeist.AI.SK.Plugins
+{
+   public partial class WizardStatePlugin
+   {
+      // Services would be injected here
+      private readonly IWizardStateCoreService _stateService;
+
+      public WizardStatePlugin(IWizardStateCoreService stateService)
+      {
+         _stateService = stateService;
+      }
+   }
+}
+
+using Microsoft.SemanticKernel;
+using System.ComponentModel;
+using CoreModels = Omnigeist.Core.Entities.Concrete;
+
+namespace Omnigeist.AI.SK.Plugins
+{
+   public partial class WizardStatePlugin
+   {
+      [KernelFunction("set_entity_data_metaverse")]
+      [Description("Sets the entity_data.metaverse to values determined from chat.")]
+      [return: Description("Updated entity_data json object.")]
+      public async Task<string> UpdateWizardEntityDataFieldMetaverse(
+          [Description("chat_tab_id")] Guid chatTabId,
+          [Description("Name of the Metaverse.")] string name,
+          [Description("Description of the Meaverse")] string description)
+      {
+         try
+         {
+            var arguments = System.Text.Json.JsonSerializer.Serialize(new { chatTabId, name, description });
+            await _stateService.UpsertEntityDataMetaverseAsync(chatTabId, name, description);
+            
+            await _stateService.LogFunctionCallAsync(
+               chatTabId,
+               "Save Metaverse",
+               "set_entity_data_metaverse",
+               arguments,
+               "success"
+            );
+            return "success";
+         }
+         catch (Exception ex)
+         {
+            await _stateService.LogFunctionCallAsync(
+               chatTabId,
+               "Save Metaverse",
+               "set_entity_data_metaverse",
+               "Error occurred while processing arguments",
+               ex.Message
+            );
+            return ex.Message;
+         }
+      }
