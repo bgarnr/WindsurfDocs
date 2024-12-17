@@ -1,0 +1,7 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs/WindsurfDocs
+/SemanticKernelDemo/bin/Debug/net9.0
+/SemanticKernelDemo/obj
