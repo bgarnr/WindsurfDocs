@@ -22,3 +22,19 @@ In Windsurf stay in chat mode, and use @ in chat to reference the docss.*. files
 
 YOU: @docs 1, @docs2, etc I want to integreate auto function calling into my sytem. I have this plugig class @mypluginclass 
 tell me how i can use autofunction calling of that class's functions in my service class @mychatservice 
+
+
+# Semantic Kernel Demo with Windsurf
+## A Console that calls some functions automatically
+
+I had a chat session with Write enabled in windsurf where I referenced the files in the Demo.Grounding folder, specifically: docs.example_autofunctioncall_will_arguments_and_streaming
+
+I started a new session with no solution or project file, just the grounding. With that I was able to ask windsurf to create a demo that would have semantic kernel auto function calling for 2 functions. 
+One would spell a word backwards and one would append a note to a file. 
+
+Windsurf had to create the solution, the project, the files and write the code. I provided a little direction and it did the rest.
+
+Once it completed, I switched to visual studio 2022 preview to debug. 
+
+You will need to update appsettings.Development.json with your openai credentials before this will run.
+
