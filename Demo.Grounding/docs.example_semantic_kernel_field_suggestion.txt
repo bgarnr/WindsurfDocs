@@ -1,0 +1,175 @@
+///sample for getting a recomendation from semantic kernel
+///include this in your windsurf chat so you can have ai refer to a working example when you make your own
+
+      public async Task<IChatMessage> GetFieldSuggestionAsync(IChatTab chatTab, string serializedEntity, string entityType, string fieldName, string originalValue)
+      {
+         string promptName = $"Generate{entityType}FieldSuggestion_{fieldName.Replace(" ", "")}";
+
+         KernelFunction promptFunction;
+         string currentDirectory = Directory.GetCurrentDirectory();
+         string solutionRoot = Path.GetFullPath(Path.Combine(currentDirectory, @"..\"));
+         string promptDirectory;
+         // Check if the prompt is already loaded
+         if (!_kernel.Plugins.TryGetFunction(entityType, promptName, out promptFunction))
+         {
+            promptDirectory = Path.Combine(solutionRoot, "YourProject", "ChildFolder", "Prompts", "CrudChat", entityType);
+
+            if (!Directory.Exists(promptDirectory))
+            {
+               throw new DirectoryNotFoundException($"Prompt directory not found: {promptDirectory}");
+            }
+            try
+            {
+               //System.ArgumentException: 'An item with the same key has already been added. Key: Character'
+               var prompts = _kernel.ImportPluginFromPromptDirectory(promptDirectory, entityType);
+               promptFunction = prompts[promptName];
+            }
+            catch (Exception ex)
+            {
+               // Log the error
+               Console.WriteLine($"Error loading prompts: {ex.Message}");
+               throw new InvalidOperationException($"Failed to load prompts for {entityType}", ex);
+            }
+         }
+
+         // Set up the arguments for the prompt
+         var kernelArguments = new KernelArguments
+         {
+            ["input"] = ((ChatTab)chatTab).FormatMessagesForSummary(),
+            [$"{entityType.ToLower()}Model"] = serializedEntity
+         };
+
+         // Invoke the specific prompt
+         string aiResponse;
+         try
+         {
+            //hey we are expecting a specific json format back that we need to map to change objects in the chatmessage
+            var result = await _kernel.InvokeAsync(promptFunction, kernelArguments);
+            aiResponse = result.GetValue<string>() ?? "Unable to generate suggestion.";
+         }
+         catch (Exception ex)
+         {
+            // Log the error
+            Console.WriteLine($"Error invoking prompt: {ex.Message}");
+            aiResponse = "An error occurred while generating the suggestion.";
+         }
+
+         // Parse the JSON response
+         var changeRecommendations = new List<ChangeRecommendation>();
+         try
+         {
+            var responseObject = JsonConvert.DeserializeObject<ChangeResponseObject>(aiResponse);
+            if (responseObject?.changes != null && responseObject.changes.Any())
+            {
+               changeRecommendations = responseObject.changes.Select(c => new ChangeRecommendation
+               {
+                  Id = Guid.NewGuid(),
+                  Field = c.Field,
+                  Multiline = c.Multiline,
+                  OldValue = originalValue,
+                  ProposedValue = c.ProposedValue,
+                  Accepted = false,
+                  Reason = c.Reason
+                  // Note: ChatMessageId will be set when the ChatMessage is created
+               }).ToList();
+            }
+         }
+         catch (JsonException ex)
+         {
+            Console.WriteLine($"Error parsing AI response: {ex.Message}");
+         }
+
+         // Create and return the ChatMessage
+         var chatMessage = new CoreModels.ChatMessage
+         {
+            Id = Guid.NewGuid(),
+            UserId = chatTab.UserId,
+            IsUserMessage = false,
+            AIPersonaId = null,
+            Text = changeRecommendations.Any() 
+                ? "Please review the following suggestion(s):" 
+                : "Unable to generate suggestions at this time.",
+            Changes = changeRecommendations,
+            ChatTabId = chatTab.Id,
+            ChatTab = (CoreModels.ChatTab)chatTab,
+            CreatedAt = DateTime.UtcNow
+         };
+
+         // Set the ChatMessageId for each ChangeRecommendation
+         foreach (var change in changeRecommendations)
+         {
+            change.ChatMessageId = chatMessage.Id;
+         }
+
+         return chatMessage;
+      }
+	  
+	     public class ChangeRecommendation : IChangeRecommendation
+   {
+      public Guid Id { get; set; }
+      public string Field { get; set; }
+      public string OldValue { get; set; }
+      public bool Multiline { get; set; }
+      public string ProposedValue { get; set; }
+      public string Reason { get; set; }
+      public bool Accepted { get; set; }
+      public Guid ChatMessageId { get; set; }
+      public ChatMessage ChatMessage { get; set; }
+   }
+   
+   
+ GenerateCharacterFieldSuggestion_Description
+	config.json 
+	{
+  "schema": 1,
+  "type": "completion",
+  "description": "Get a recommended description for the current character.",
+  "execution_settings": {
+    "default": {
+      "max_tokens": 800,
+      "temperature": 0
+    }
+  },
+  "input_variables": [
+    {
+      "name": "input",
+      "description": "Messages from chat summarized.",
+      "required": true
+    },
+    {
+      "name": "characterModel",
+      "description": "The serialized ViewModel of the Character.",
+      "required": true
+    }
+  ]
+}
+skprompt.txt
+You are an AI assistant helping a user of the Omnigeist storytelling system. 
+The user is providing information in a form about a narrative character that they want to design and later write about.
+You are an expert at narrative character design helping an aspiring writer understand character design in writing. 
+Briefly explain the importance of a character's general description in storytelling, focusing on non-physical aspects. 
+Use markdown formatting.
+
+Consider the following context:
+{{$input}}
+CharacterDetails:
+{{$characterModel}}
+
+Describe how the Description field could be used differently than the other fields. This prompt is not for suggestions, we are only describing the importance of the Description field in character design.
+
+Guidelines:
+1. Explain how the description defines CharacterDetails.Name's essence beyond physical attributes.
+3. Highlight its influence on the story and reader perception.
+4. If relevant, relate to CharacterDetails.Name's other traits from the character model.
+5. Keep the response concise and focused on storytelling impact.
+
+Aim for a brief, informative help message, not a letter or extensive explanation.
+Use whitespace newlines to seperate ideas as people do in chat.
+
+
+Use # for main headings.
+Use ## for subheadings.
+Use regular text for paragraphs.
+Use * or - for bullet points.
+Use > for blockquotes if necessary.
+Ensure the content is well-structured, easy to read, and utilizes Markdown elements effectively. Provide the output strictly in Markdown format without any additional commentary or HTML code. I'd like to have a prompt made like that but for the Physical Description field. The goal of the physical description field is to have enough information to make ai generated images from the value
